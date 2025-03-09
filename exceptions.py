@@ -1,16 +1,14 @@
-class NotFoundTokenException(Exception):
+class NotFoundTokenError(Exception):
     """Исключение пустоты необходимых токенов."""
 
-    pass
 
-
-class StatusHomeworkException(Exception):
+class StatusHomeworkError(Exception):
     """Исключение ответа от Практикум Домашка."""
 
-    pass
 
-
-class NotFoundHomeworkNameException(Exception):
+class NotFoundHomeworkNameError(Exception):
     """Исключение ответа от Практикум Домашка."""
 
-    pass
+
+class ConnectionError(Exception):
+    """Исключение, когда код статуса не равен 200."""
