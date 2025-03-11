@@ -100,7 +100,7 @@ def get_api_answer(timestamp):
     )
     try:
         homework_statuses = requests.get(**requests_pars)
-    except RequestException as error:  # Обрабатываем все исключения от requests
+    except RequestException as error:
         logging.error(ERROR_CONNECT_PHRASE.format(
             error=error,
             **requests_pars
@@ -122,7 +122,6 @@ def get_api_answer(timestamp):
                     **requests_pars
                 ))
     return data
-
 
 
 def check_response(response):
