@@ -172,7 +172,7 @@ def main():
             verdict = parse_status(homeworks[0])
             if verdict != sent_message and send_message(bot, verdict):
                 sent_message = verdict
-                timestamp = response.get('current_date', None)
+                timestamp = response.get('current_date', timestamp)
         except Exception as error:
             message = ERROR_PHRASE.format(error=error)
             logging.error(message)
