@@ -7,7 +7,8 @@ import requests
 from dotenv import load_dotenv
 from telebot import TeleBot
 
-from requests.exceptions import RequestException, HTTPError
+from requests.exceptions import RequestException
+from exceptions import ApiResponseError, ApiResponseDataError
 
 load_dotenv()
 
@@ -101,13 +102,14 @@ def get_api_answer(timestamp):
     try:
         homework_statuses = requests.get(**requests_pars)
     except RequestException as error:
-        logging.error(ERROR_CONNECT_PHRASE.format(
-            error=error,
-            **requests_pars
-        ))
+        raise ConnectionError(
+            ERROR_CONNECT_PHRASE.format(
+                error=error,
+                **requests_pars
+            ))
     status_code = homework_statuses.status_code
     if status_code != HTTPStatus.OK:
-        raise HTTPError(
+        raise ApiResponseError(
             NOT_CORRECT_CODE_PHRASE.format(
                 status_code=status_code,
                 **requests_pars
@@ -115,7 +117,7 @@ def get_api_answer(timestamp):
     data = homework_statuses.json()
     for key in ['error', 'code']:
         if key in data:
-            raise ValueError(
+            raise ApiResponseDataError(
                 ERROR_KEY_PHRASE.format(
                     key=key,
                     value=data[key],
@@ -167,11 +169,10 @@ def main():
             if not homeworks:
                 logging.debug(NO_HOMEWORKS_PHRASE)
                 continue
-            homework = homeworks[0]
-            verdict = parse_status(homework)
+            verdict = parse_status(homeworks[0])
             if verdict != sent_message and send_message(bot, verdict):
                 sent_message = verdict
-                timestamp = response.get('current_date')
+                timestamp = response.get('current_date', None)
         except Exception as error:
             message = ERROR_PHRASE.format(error=error)
             logging.error(message)
