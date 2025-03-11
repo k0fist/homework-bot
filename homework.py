@@ -1,4 +1,3 @@
-import datetime
 from http import HTTPStatus
 import logging
 import os
@@ -27,13 +26,36 @@ HOMEWORK_VERDICTS = {
     'rejected': 'Работа проверена: у ревьюера есть замечания.'
 }
 STATUS_CHANGE = 'Изменился статус проверки работы "{name}". {status}'
-ERROR_PARAMENTS = ('\n1. endpoint: {endpoint} '
-                   '\n2. headers: {headers} '
-                   '\n3. params: {from_date}')
-DICT_FROM_DATE = "{'from_date': {timestamp}}"
 MISSING_TOKENS_PHRASE = 'Нужные переменные окружения пустые: {missing_tokens}.'
 TOKENS_FOUND_PHRASE = 'Все токены найдены.'
-PHRASE_SEND_MESSAGE = 'Сообщение: {message}, {result} отправлено пользователю'
+PHRASE_SEND_MESSAGE = 'Сообщение: {message}, отправлено пользователю'
+PHRASE_NO_SEND_MESSAGE = (
+    'Сообщение: {message}, не отправлено пользователю. '
+    'Произошла ошибка: {error}.'
+)
+ERROR_CONNECT_PHRASE = (
+    'Произошла ошибка: {error} на запрос, с параметрами: '
+    '\n1. endpoint: {endpoint} '
+    '\n2. headers: {headers} '
+    "\n3. params: {'from_date': {timestamp}}"
+)
+NOT_CORRECT_CODE_PHRASE = (
+    'API возвращает код {status_code}, с параметрами: '
+    '\n1. endpoint: {endpoint} '
+    '\n2. headers: {headers} '
+    "\n3. params: {'from_date': {timestamp}}"
+)
+ERROR_KEY_PHRASE = (
+    'В ответе есть ключ {key} со значением {value} '
+    'на запрос, с параметрами: '
+    '\n1. endpoint: {endpoint} '
+    '\n2. headers: {headers} '
+    "\n3. params: {'from_date': {timestamp}}"
+)
+NEED_KEY_HM_PHRASE = (
+    "Ожидается список под ключом 'homeworks', "
+    'а получили: {type}.'
+)
 ERROR_PHRASE = 'Произошла ошибка: {error}.'
 NEED_DICT_PHRASE = 'Ожидается, что в ответе словарь, а получили: {response}.'
 NEED_KEY_PHRASE = 'Отсутствует ключ {key}.'
@@ -60,13 +82,13 @@ def send_message(bot, message):
     """Отправка ботом сообщений."""
     try:
         bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
-        logging.debug(PHRASE_SEND_MESSAGE.format(message=message, result=''))
+        logging.debug(PHRASE_SEND_MESSAGE.format(message=message))
         return True
     except Exception as error:
         logging.exception(
-            f'{PHRASE_SEND_MESSAGE.format(message=message, result='НЕ')}'
-            f'{ERROR_PHRASE.format(error=error)}'
+            f'{PHRASE_NO_SEND_MESSAGE.format(message=message, error=error)}'
         )
+        return False
 
 
 def get_api_answer(timestamp):
@@ -77,35 +99,34 @@ def get_api_answer(timestamp):
             headers=HEADERS,
             params={'from_date': {timestamp}}
         )
-        status_code = homework_statuses.status_code
     except requests.RequestException as error:
         raise ConnectionError(
-            f'{ERROR_PHRASE.format(error=error)} на запрос, '
-            f'с параметрами: {ERROR_PARAMENTS.format(
+            ERROR_CONNECT_PHRASE.format(
+                error=error,
                 endpoint=ENDPOINT,
                 headers=HEADERS,
-                params=DICT_FROM_DATE.format(timestamp=timestamp)
-            )}')
+                timestamp=timestamp
+            ))
+    status_code = homework_statuses.status_code
     if status_code != HTTPStatus.OK:
         raise requests.exceptions.HTTPError(
-            f'API возвращает код {status_code}, '
-            f'с параметрами: {ERROR_PARAMENTS.format(
+            NOT_CORRECT_CODE_PHRASE.format(
+                status_code=status_code,
                 endpoint=ENDPOINT,
                 headers=HEADERS,
-                params=DICT_FROM_DATE.format(timestamp=timestamp)
-            )}')
+                timestamp=timestamp
+            ))
     data = homework_statuses.json()
-    if (found_key := (
-        'error' if 'error' in data else
-        'code' if 'code' in data else None
-    )):
-        raise KeyError(
-            f'В ответе есть ключ {found_key} со значением {data[found_key]} '
-            f'на запрос, с параметрами: {ERROR_PARAMENTS.format(
-                endpoint=ENDPOINT,
-                headers=HEADERS,
-                params=DICT_FROM_DATE.format(timestamp=timestamp)
-            )}')
+    for key in ['error', 'code']:
+        if key in data:
+            raise LookupError(
+                ERROR_KEY_PHRASE.format(
+                    key=key,
+                    value=data[key],
+                    endpoint=ENDPOINT,
+                    headers=HEADERS,
+                    timestamp=timestamp
+                ))
     return data
 
 
@@ -113,13 +134,13 @@ def check_response(response):
     """Проверка ответа от сервиса Практикум Домашка по API."""
     if not isinstance(response, dict):
         raise TypeError(NEED_DICT_PHRASE.format(response=type(response)))
-    homeworks = response.get('homeworks', None)
     if 'homeworks' not in response:
         raise KeyError(NEED_KEY_PHRASE.format(key='homeworks'))
+    homeworks = response['homeworks']
     if not isinstance(homeworks, list):
-        raise TypeError(
-            "Ожидается список под ключом 'homeworks', "
-            f"а получили: {type(homeworks)}.")
+        raise TypeError(NEED_KEY_HM_PHRASE.format(
+            type=type(homeworks)
+        ))
     return homeworks
 
 
@@ -129,11 +150,11 @@ def parse_status(homework):
         raise KeyError(NOT_FOUND_NAME_PHRASE)
     if 'status' not in homework:
         raise KeyError(NOT_FOUND_STATUS_PHRASE)
-    status = homework.get('status')
+    status = homework['status']
     if status not in HOMEWORK_VERDICTS:
         raise ValueError(STATUS_ERROR_PHRASE.format(status=status))
     return (STATUS_CHANGE.format(
-        name=homework.get('homework_name'),
+        name=homework['homework_name'],
         status=HOMEWORK_VERDICTS[status])
     )
 
@@ -156,11 +177,7 @@ def main():
             verdict = parse_status(homework)
             if verdict != sent_message and send_message(bot, verdict):
                 sent_message = verdict
-                last_change_time = homework.get('date_updated')
-                timestamp = int(datetime.datetime.strptime(
-                    last_change_time,
-                    '%Y-%m-%dT%H:%M:%SZ'
-                ).timestamp())
+                timestamp = response['current_date']
         except Exception as error:
             message = ERROR_PHRASE.format(error=error)
             logging.error(message)
