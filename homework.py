@@ -7,7 +7,7 @@ import requests
 from dotenv import load_dotenv
 from telebot import TeleBot
 
-from requests.exceptions import ConnectionError
+from requests.exceptions import RequestException, HTTPError
 
 load_dotenv()
 
@@ -35,22 +35,22 @@ PHRASE_NO_SEND_MESSAGE = (
 )
 ERROR_CONNECT_PHRASE = (
     'Произошла ошибка: {error} на запрос, с параметрами: '
-    '\n1. endpoint: {endpoint} '
+    '\n1. url: {url} '
     '\n2. headers: {headers} '
-    "\n3. params: {'from_date': {timestamp}}"
+    "\n3. params: {params}"
 )
 NOT_CORRECT_CODE_PHRASE = (
     'API возвращает код {status_code}, с параметрами: '
-    '\n1. endpoint: {endpoint} '
+    '\n1. url: {url} '
     '\n2. headers: {headers} '
-    "\n3. params: {'from_date': {timestamp}}"
+    "\n3. params: {params}"
 )
 ERROR_KEY_PHRASE = (
     'В ответе есть ключ {key} со значением {value} '
     'на запрос, с параметрами: '
-    '\n1. endpoint: {endpoint} '
+    '\n1. url: {url} '
     '\n2. headers: {headers} '
-    "\n3. params: {'from_date': {timestamp}}"
+    "\n3. params: {params}"
 )
 NEED_KEY_HM_PHRASE = (
     "Ожидается список под ключом 'homeworks', "
@@ -86,48 +86,43 @@ def send_message(bot, message):
         return True
     except Exception as error:
         logging.exception(
-            f'{PHRASE_NO_SEND_MESSAGE.format(message=message, error=error)}'
+            PHRASE_NO_SEND_MESSAGE.format(message=message, error=error)
         )
         return False
 
 
 def get_api_answer(timestamp):
     """Получение ответа от сервиса Практикум Домашка по API."""
+    requests_pars = dict(
+        url=ENDPOINT,
+        headers=HEADERS,
+        params={'from_date': {timestamp}}
+    )
     try:
-        homework_statuses = requests.get(
-            ENDPOINT,
-            headers=HEADERS,
-            params={'from_date': {timestamp}}
-        )
-    except requests.RequestException as error:
-        raise ConnectionError(
-            ERROR_CONNECT_PHRASE.format(
-                error=error,
-                endpoint=ENDPOINT,
-                headers=HEADERS,
-                timestamp=timestamp
-            ))
+        homework_statuses = requests.get(**requests_pars)
+    except RequestException as error:  # Обрабатываем все исключения от requests
+        logging.error(ERROR_CONNECT_PHRASE.format(
+            error=error,
+            **requests_pars
+        ))
     status_code = homework_statuses.status_code
     if status_code != HTTPStatus.OK:
-        raise requests.exceptions.HTTPError(
+        raise HTTPError(
             NOT_CORRECT_CODE_PHRASE.format(
                 status_code=status_code,
-                endpoint=ENDPOINT,
-                headers=HEADERS,
-                timestamp=timestamp
+                **requests_pars
             ))
     data = homework_statuses.json()
     for key in ['error', 'code']:
         if key in data:
-            raise LookupError(
+            raise ValueError(
                 ERROR_KEY_PHRASE.format(
                     key=key,
                     value=data[key],
-                    endpoint=ENDPOINT,
-                    headers=HEADERS,
-                    timestamp=timestamp
+                    **requests_pars
                 ))
     return data
+
 
 
 def check_response(response):
@@ -177,7 +172,7 @@ def main():
             verdict = parse_status(homework)
             if verdict != sent_message and send_message(bot, verdict):
                 sent_message = verdict
-                timestamp = response['current_date']
+                timestamp = response.get('current_date')
         except Exception as error:
             message = ERROR_PHRASE.format(error=error)
             logging.error(message)
